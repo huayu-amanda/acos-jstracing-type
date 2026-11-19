@@ -7,24 +7,44 @@ const JSTracing = require("./runtime");
 exports.packageType = "content-type";
 exports.namespace = "jstracing";
 exports.register = function registerJSTracingType(handlers, app, config) {
+  const defaultToolsJarPath = path.join(__dirname, "static", "assets", "tools.jar");
   const configuredToolsJarPath = process.env.JSTRACING_TOOLS_JAR_PATH ||
-    (config && config.jstracingToolsJarPath) || "";
+    (config && config.jstracingToolsJarPath) ||
+    defaultToolsJarPath;
   const toolsJarPath = String(configuredToolsJarPath).trim();
-  const resolvedToolsJarPath = toolsJarPath ? path.resolve(toolsJarPath) : "";
-  const toolsJarExists = Boolean(resolvedToolsJarPath) &&
-    fs.existsSync(resolvedToolsJarPath) &&
-    fs.statSync(resolvedToolsJarPath).isFile();
+  let resolvedToolsJarPath = toolsJarPath ? path.resolve(toolsJarPath) : defaultToolsJarPath;
+
+  if (!fs.existsSync(resolvedToolsJarPath) || !fs.statSync(resolvedToolsJarPath).isFile()) {
+    if (resolvedToolsJarPath !== defaultToolsJarPath && fs.existsSync(defaultToolsJarPath)) {
+      console.warn("[acos-jstracing-type] WARN: configured tools.jar not found at", resolvedToolsJarPath, "- using", defaultToolsJarPath);
+      resolvedToolsJarPath = defaultToolsJarPath;
+    }
+  }
+
+  const toolsJarExists = fs.existsSync(resolvedToolsJarPath) && fs.statSync(resolvedToolsJarPath).isFile();
 
   // CheerpJ maps virtual /app/tools.jar to the HTTP /tools.jar endpoint.
   if (app && typeof app.get === "function" && toolsJarExists) {
-    app.get("/tools.jar", function(req, res) {
+    const serveToolsJar = function(req, res) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "*");
+      if (req.method === "OPTIONS") {
+        return res.sendStatus(204);
+      }
       res.sendFile(resolvedToolsJarPath);
-    });
+    };
+
+    if (typeof app.all === "function") {
+      app.all("/tools.jar", serveToolsJar);
+      app.all("/static/jstracing/assets/tools.jar", serveToolsJar);
+    } else {
+      app.get("/tools.jar", serveToolsJar);
+      app.get("/static/jstracing/assets/tools.jar", serveToolsJar);
+    }
     console.log("[acos-jstracing-type] INFO: serving /tools.jar from", resolvedToolsJarPath);
-  } else if (toolsJarPath) {
-    console.warn("[acos-jstracing-type] WARN: configured tools.jar was not found or is not a file at", resolvedToolsJarPath);
-  } else {
-    console.warn("[acos-jstracing-type] WARN: JSTRACING_TOOLS_JAR_PATH is not configured; Java compilation is unavailable.");
+  } else if (!toolsJarExists) {
+    console.warn("[acos-jstracing-type] WARN: tools.jar was not found; Java compilation is unavailable.");
   }
 
   // Prefer remote CheerpJ runtime by default.
@@ -36,7 +56,8 @@ exports.register = function registerJSTracingType(handlers, app, config) {
     disableSelfHostRaw === "on";
 
   const cheerpjSelfHostDir = process.env.CHEERPJ_SELF_HOST_DIR ||
-    (config && config.cheerpjSelfHostDir);
+    (config && config.cheerpjSelfHostDir) ||
+    path.join(__dirname, "static", "assets", "cheerpj", "4.3");
   if (!selfHostDisabled && app && typeof app.get === "function" && cheerpjSelfHostDir && fs.existsSync(cheerpjSelfHostDir)) {
     const selfHostRoot = path.resolve(cheerpjSelfHostDir);
     app.get("/static/cheerpj/4.3/*", function(req, res, next) {

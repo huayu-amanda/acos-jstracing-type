@@ -11,6 +11,7 @@ const main = () => {
     path.join(staticDir, "css", "jstracing.css"),
     path.join(staticDir, "js", "jstracing.js"),
     path.join(staticDir, "js", "runtime-config.js"),
+    path.join(staticDir, "assets", "tools.jar"),
   ];
 
   for (const filePath of requiredFiles) {
